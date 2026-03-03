@@ -1,0 +1,87 @@
+[
+  {
+    "permission": "builtin_skill",
+    "action": "allow",
+    "pattern": "*"
+  },
+  {
+    "permission": "builtin_shell",
+    "action": "allow",
+    "pattern": "*"
+  },
+  {
+    "permission": "shell_execute",
+    "action": "allow",
+    "pattern": "*"
+  },
+  {
+    "permission": "builtin_read_file",
+    "action": "allow",
+    "pattern": "*"
+  },
+  {
+    "permission": "builtin_skill",
+    "action": "allow",
+    "pattern": "*"
+  },
+  {
+    "permission": "builtin_shell",
+    "action": "allow",
+    "pattern": "*"
+  },
+  {
+    "permission": "shell_execute",
+    "action": "allow",
+    "pattern": "*"
+  },
+  {
+    "permission": "builtin_skill",
+    "action": "allow",
+    "pattern": "*"
+  },
+  {
+    "permission": "builtin_shell",
+    "action": "allow",
+    "pattern": "*"
+  },
+  {
+    "permission": "shell_execute",
+    "action": "allow",
+    "pattern": "*"
+  },
+  {
+    "permission": "builtin_read_file",
+    "action": "allow",
+    "pattern": "*"
+  },
+  {
+    "permission": "builtin_skill",
+    "action": "allow",
+    "pattern": "*"
+  },
+  {
+    "permission": "builtin_shell",
+    "action": "allow",
+    "pattern": "*"
+  },
+  {
+    "permission": "shell_execute",
+    "action": "allow",
+    "pattern": "*"
+  },
+  {
+    "permission": "builtin_read_file",
+    "action": "allow",
+    "pattern": "*"
+  },
+  {
+    "permission": "builtin_skill",
+    "action": "allow",
+    "pattern": "*"
+  },
+  {
+    "permission": "builtin_shell",
+    "action": "allow",
+    "pattern": "*"
+  }
+]

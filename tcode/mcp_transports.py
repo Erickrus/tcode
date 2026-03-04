@@ -107,9 +107,10 @@ class HTTPStreamTransport(Transport):
                     r = await self._client.post(url, headers=self.headers, json=payload)
                     r.raise_for_status()
                     try:
-                        return r.json()
+                        yield r.json()
                     except Exception:
-                        return {"text": await r.aread()}
+                        yield {"text": await r.aread()}
+                    return
             except Exception:
                 # try next url
                 continue

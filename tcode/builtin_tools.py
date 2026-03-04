@@ -10,10 +10,23 @@ import httpx
 
 # Implement built-in tools for MVP
 
+
+def _verbose_log(ctx: ToolContext, tool_name: str, args: Dict[str, Any]):
+    """Print tool invocation details when verbose mode is enabled."""
+    if not (ctx.extra and ctx.extra.get("verbose")):
+        return
+    import sys, json as _json
+    summary = {}
+    for k, v in args.items():
+        s = str(v)
+        summary[k] = s if len(s) <= 120 else s[:117] + "..."
+    print(f"\033[2m[verbose] tool={tool_name} args={_json.dumps(summary, ensure_ascii=False)}\033[0m", file=sys.stderr)
+
 class EchoParams(BaseModel):
     text: str
 
 async def echo_execute(args: Dict[str, Any], ctx: ToolContext) -> ToolResult:
+    _verbose_log(ctx, "echo", args)
     return ToolResult(title="echo", metadata={}, output=args.get("text"), attachments=None)
 
 class ReadFileParams(BaseModel):
@@ -21,6 +34,7 @@ class ReadFileParams(BaseModel):
     max_bytes: int = 1000000
 
 async def read_file_execute(args: Dict[str, Any], ctx: ToolContext) -> ToolResult:
+    _verbose_log(ctx, "read_file", args)
     path = args.get("path")
     max_bytes = args.get("max_bytes", 1000000)
     # safe canonicalization: prevent accessing outside cwd
@@ -46,6 +60,7 @@ class WriteFileParams(BaseModel):
     overwrite: bool = False
 
 async def write_file_execute(args: Dict[str, Any], ctx: ToolContext) -> ToolResult:
+    _verbose_log(ctx, "write_file", args)
     path = args.get("path")
     content = args.get("content", "")
     overwrite = args.get("overwrite", False)
@@ -64,6 +79,7 @@ class ListFilesParams(BaseModel):
     root: Optional[str] = None
 
 async def list_files_execute(args: Dict[str, Any], ctx: ToolContext) -> ToolResult:
+    _verbose_log(ctx, "list_files", args)
     pattern = args.get("pattern")
     root = args.get("root") or os.getcwd()
     abs_root = os.path.abspath(root)
@@ -78,6 +94,7 @@ class GrepParams(BaseModel):
     max_results: int = 100
 
 async def grep_execute(args: Dict[str, Any], ctx: ToolContext) -> ToolResult:
+    _verbose_log(ctx, "grep", args)
     pattern = args.get("pattern")
     path = args.get("path") or os.getcwd()
     max_results = args.get("max_results", 100)
@@ -103,6 +120,7 @@ class FileAttachParams(BaseModel):
     mime: str
 
 async def file_attach_execute(args: Dict[str, Any], ctx: ToolContext) -> ToolResult:
+    _verbose_log(ctx, "file_attach", args)
     import base64
     content_b64 = args.get("content_b64")
     filename = args.get("filename")
@@ -122,6 +140,7 @@ class HttpFetchParams(BaseModel):
     max_bytes: int = 100000
 
 async def http_fetch_execute(args: Dict[str, Any], ctx: ToolContext) -> ToolResult:
+    _verbose_log(ctx, "http_fetch", args)
     # permission gating: request network access
     perm_allowed = False
     try:
@@ -162,6 +181,7 @@ import subprocess
 from typing import Tuple
 
 async def shell_execute(args: Dict[str, Any], ctx: ToolContext) -> ToolResult:
+    _verbose_log(ctx, "shell", args)
     cmd = args.get('cmd')
     timeout = args.get('timeout', 30)
     # permission gating: require ctx.extra.get('allow_shell') or ask permission
@@ -183,7 +203,7 @@ async def shell_execute(args: Dict[str, Any], ctx: ToolContext) -> ToolResult:
     if not exe:
         return ToolResult(title='shell', metadata={}, output=f'Error: executable not found: {parts[0]}')
     try:
-        proc = subprocess.run(parts, capture_output=True, text=True, timeout=timeout, shell=False)
+        proc = subprocess.run(parts, capture_output=True, text=True, timeout=timeout, shell=True)
         return ToolResult(title='shell', metadata={'code': proc.returncode}, output=proc.stdout + '\n' + proc.stderr)
     except subprocess.TimeoutExpired:
         return ToolResult(title='shell', metadata={'timeout': True}, output='Error: timeout')
@@ -204,6 +224,7 @@ class EditParams(BaseModel):
 
 async def edit_execute(args: Dict[str, Any], ctx: ToolContext) -> ToolResult:
     """Targeted string replacement in a file (matching opencode edit tool)."""
+    _verbose_log(ctx, "edit", args)
     file_path = args.get("file_path", "")
     old_string = args.get("old_string", "")
     new_string = args.get("new_string", "")
@@ -251,6 +272,7 @@ class TodoWriteParams(BaseModel):
 
 async def todowrite_execute(args: Dict[str, Any], ctx: ToolContext) -> ToolResult:
     """Write/replace all todos for the current session."""
+    _verbose_log(ctx, "todowrite", args)
     import json as _json
     todos = args.get("todos", [])
     sessions = ctx.extra.get("sessions") if ctx.extra else None
@@ -272,6 +294,7 @@ class TodoReadParams(BaseModel):
 
 async def todoread_execute(args: Dict[str, Any], ctx: ToolContext) -> ToolResult:
     """Read all todos for the current session."""
+    _verbose_log(ctx, "todoread", args)
     import json as _json
     sessions = ctx.extra.get("sessions") if ctx.extra else None
     if not sessions or not ctx.session_id:
@@ -296,6 +319,7 @@ class TaskParams(BaseModel):
 
 async def task_execute(args: Dict[str, Any], ctx: ToolContext) -> ToolResult:
     """Spawn a subagent in a child session. Requires agent_runner in ctx.extra."""
+    _verbose_log(ctx, "task", args)
     description = args.get("description", "")
     prompt = args.get("prompt", "")
     subagent_type = args.get("subagent_type", "explore")
@@ -356,6 +380,7 @@ def register_builtin_tools(registry: ToolRegistry):
 
 # module-level plan_exit implementation so tests can import it
 async def plan_exit_execute(args: Dict[str, Any], ctx: ToolContext) -> ToolResult:
+    _verbose_log(ctx, "plan_exit", args)
     # only allowed in plan mode; mark session plan as ready
     session_id = ctx.session_id
     try:
@@ -382,6 +407,7 @@ class StructuredParams(BaseModel):
 
 # expose structured_execute for unit tests
 async def structured_execute(args: Dict[str, Any], ctx: ToolContext) -> ToolResult:
+    _verbose_log(ctx, "structured_output", args)
     # Ask provider to produce JSON matching the schema, then validate basic shape.
     import json
     schema = args.get('schema')

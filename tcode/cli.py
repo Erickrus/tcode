@@ -121,7 +121,7 @@ class TcodeCLI:
             self.command_registry.load_from_skills(list(self._discovered_skills.values()))
 
         # MCP
-        self.mcp_manager = MCPManager()
+        self.mcp_manager = MCPManager(events=self.events, tool_registry=self.tool_registry)
         await self._connect_mcp()
 
         # Register MCP list tool (agent-callable)
@@ -196,6 +196,17 @@ class TcodeCLI:
                 if mcp_cfg.timeout:
                     cfg_dict["timeout"] = mcp_cfg.timeout
                 await self.mcp_manager.add(name, cfg_dict)
+                # Register MCP tools into the tool registry
+                if self.mcp_manager.status.get(name) == "connected":
+                    try:
+                        client = self.mcp_manager.clients.get(name)
+                        if client:
+                            raw_tools = await client.list_tools()
+                            for t in raw_tools:
+                                toolinfo = self.mcp_manager.convert_mcp_tool(name, t)
+                                self.tool_registry.register(toolinfo)
+                    except Exception:
+                        pass
                 # Load MCP prompts as commands
                 try:
                     if hasattr(self.mcp_manager, "list_prompts"):
@@ -424,7 +435,7 @@ class TcodeCLI:
                         if name in self.mcp_manager.clients:
                             tools = [
                                 t for t in self.tool_registry.list()
-                                if t.startswith(f"mcp.{name}.")
+                                if t.startswith(f"mcp_{name}_")
                             ]
                         tool_count = f"  ({len(tools)} tools)" if tools else ""
                         print(f"  {name}: {st}{tool_count}")
@@ -571,6 +582,10 @@ async def async_main():
         "--db", default=None,
         help="SQLite database path",
     )
+    parser.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Verbose mode: log tool invocations and other debug info",
+    )
 
     args = parser.parse_args()
     print(banner)
@@ -588,6 +603,9 @@ async def async_main():
 
     try:
         await cli.setup()
+
+        if args.verbose:
+            cli.agent_runner.toolrunner.verbose = True
 
         if args.prompt:
             # Single-shot mode

@@ -24,16 +24,66 @@ class GeminiAdapter(ProviderAdapter):
             self._client = genai.Client(api_key=self.api_key)
         return self._client
 
+    # Fields that Gemini's Schema actually supports.
+    _GEMINI_SCHEMA_KEYS = frozenset({
+        "type", "description", "properties", "required", "items",
+        "enum", "format", "nullable", "minimum", "maximum",
+        "min_items", "max_items",
+    })
+
+    def _sanitize_schema(self, schema: Any) -> Any:
+        """Recursively strip fields unsupported by Gemini (e.g. additional_properties, anyOf, $schema)."""
+        if not isinstance(schema, dict):
+            return schema
+
+        cleaned: Dict[str, Any] = {}
+        for key, value in schema.items():
+            # Convert camelCase variants to snake_case used by Gemini
+            normalized = key
+            if key == "additionalProperties":
+                normalized = "additional_properties"
+            elif key == "minItems":
+                normalized = "min_items"
+            elif key == "maxItems":
+                normalized = "max_items"
+
+            # Drop keys Gemini doesn't understand
+            if normalized not in self._GEMINI_SCHEMA_KEYS:
+                # Special handling: flatten anyOf/oneOf with a single entry
+                if key in ("anyOf", "oneOf") and isinstance(value, list) and len(value) == 1:
+                    merged = self._sanitize_schema(value[0])
+                    if isinstance(merged, dict):
+                        for mk, mv in merged.items():
+                            cleaned.setdefault(mk, mv)
+                continue
+
+            # Recurse into nested structures
+            if normalized == "properties" and isinstance(value, dict):
+                cleaned[normalized] = {
+                    k: self._sanitize_schema(v) for k, v in value.items()
+                }
+            elif normalized == "items" and isinstance(value, dict):
+                cleaned[normalized] = self._sanitize_schema(value)
+            else:
+                cleaned[normalized] = value
+
+        # Ensure a type is always present
+        if "type" not in cleaned:
+            cleaned["type"] = "object"
+
+        return cleaned
+
     def _format_tools(self, tools: Optional[List[Dict[str, Any]]]) -> Optional[List[types.Tool]]:
         """Convert generic tool defs to Gemini Tool objects."""
         if not tools:
             return None
         declarations = []
         for t in tools:
+            raw_params = t.get("parameters", {"type": "object", "properties": {}})
             declarations.append(types.FunctionDeclaration(
                 name=t["name"],
                 description=t.get("description", ""),
-                parameters=t.get("parameters", {"type": "object", "properties": {}}),
+                parameters=self._sanitize_schema(raw_params),
             ))
         return [types.Tool(function_declarations=declarations)]
 
@@ -127,7 +177,7 @@ class GeminiAdapter(ProviderAdapter):
         full_text = ""
 
         try:
-            async for response in client.aio.models.generate_content_stream(
+            async for response in await client.aio.models.generate_content_stream(
                 model=model,
                 contents=contents,
                 config=config,

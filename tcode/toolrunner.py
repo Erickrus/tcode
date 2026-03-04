@@ -28,7 +28,7 @@ class ToolRunner:
                 part_id = None
 
         # Merge permission rulesets: project rules → session rules (last wins)
-        extra = {"permissions": getattr(self, 'permissions', None), "sessions": self.sessions}
+        extra = {"permissions": getattr(self, 'permissions', None), "sessions": self.sessions, "verbose": getattr(self, 'verbose', False)}
         try:
             from .permission_next import merge_rulesets
             from .instance import Instance

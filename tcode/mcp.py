@@ -170,7 +170,9 @@ class MCPManager:
         if isinstance(schema, dict):
             schema = {**schema, 'type': 'object', 'additionalProperties': False}
         mcp_tool_def['inputSchema'] = schema
-        tool_id = f"mcp.{mcp_name}.{mcp_tool_def.get('name') or mcp_tool_def.get('id') or next_id('tool')}"
+        # Use underscores instead of dots — LLM APIs (Anthropic, OpenAI) require
+        # tool names to match ^[a-zA-Z0-9_-]{1,128}$
+        tool_id = f"mcp_{mcp_name}_{mcp_tool_def.get('name') or mcp_tool_def.get('id') or next_id('tool')}"
         description = mcp_tool_def.get('description') or ''
         # permissive params model
         from pydantic import BaseModel

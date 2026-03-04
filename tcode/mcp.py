@@ -83,13 +83,24 @@ class MCPManager:
         base_url = config.get("url")
         headers = config.get("headers") or {}
         timeout = config.get("timeout", 60)
-        # pick transport
+        # pick transport — auto-detect type when command is present
         transport = None
-        if config.get('type') == 'local' and config.get('command'):
+        mcp_type = config.get('type')
+        has_command = config.get('command') is not None
+        if mcp_type is None and has_command:
+            mcp_type = 'local'
+        if mcp_type == 'local' and has_command:
             from .mcp_transports import StdioTransport
-            cmd = config['command'][0]
-            args = config['command'][1:]
-            transport = StdioTransport(cmd, args=args, cwd=config.get('cwd'))
+            raw_cmd = config['command']
+            if isinstance(raw_cmd, str):
+                # command is a plain string, args in a separate field
+                cmd = raw_cmd
+                args = config.get('args') or []
+            else:
+                # command is a list: first element is executable, rest are args
+                cmd = raw_cmd[0]
+                args = list(raw_cmd[1:])
+            transport = StdioTransport(cmd, args=args, cwd=config.get('cwd'), env=config.get('env'))
         else:
             from .mcp_transports import HTTPStreamTransport
             transport = HTTPStreamTransport(base_url, headers=headers, timeout=timeout)

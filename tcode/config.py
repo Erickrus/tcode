@@ -49,12 +49,22 @@ class AgentConfig(BaseModel):
 
 class McpServerConfig(BaseModel):
     """Configuration for a single MCP server."""
-    type: str = "http"  # "http" | "local"
-    command: Optional[List[str]] = None  # for local
+    type: Optional[str] = None  # "http" | "local"; auto-detected if not set
+    command: Optional[Union[str, List[str]]] = None  # for local: executable string or [exe, ...args]
+    args: Optional[List[str]] = None  # for local: arguments when command is a string
     url: Optional[str] = None  # for http
     headers: Dict[str, str] = Field(default_factory=dict)
     timeout: int = 60
     enabled: bool = True
+
+    @model_validator(mode='after')
+    def _infer_type(self):
+        if self.type is None:
+            if self.command is not None:
+                self.type = 'local'
+            else:
+                self.type = 'http'
+        return self
 
 
 class CommandConfig(BaseModel):

@@ -195,6 +195,9 @@ class TcodeCLI:
                     cfg_dict["headers"] = mcp_cfg.headers
                 if mcp_cfg.timeout:
                     cfg_dict["timeout"] = mcp_cfg.timeout
+                # Pass through args for stdio transports
+                if mcp_cfg.args:
+                    cfg_dict["args"] = mcp_cfg.args
                 await self.mcp_manager.add(name, cfg_dict)
                 # Register MCP tools into the tool registry
                 if self.mcp_manager.status.get(name) == "connected":
@@ -536,6 +539,13 @@ Ctrl+C during generation aborts the current run.
 
     async def teardown(self):
         """Clean up resources."""
+        # Close MCP transports (subprocess pipes) before the event loop closes
+        if self.mcp_manager:
+            for name in list(self.mcp_manager.transports):
+                try:
+                    await self.mcp_manager.remove(name)
+                except Exception:
+                    pass
         if self.storage:
             await self.storage.close()
         from .instance import dispose_all

@@ -162,51 +162,183 @@ class SSETransport(Transport):
         self._handlers[notification] = handler
 
 class StdioTransport(Transport):
+    """MCP stdio transport using JSON-RPC over stdin/stdout.
+
+    Speaks the MCP protocol:
+      - initialize handshake
+      - tools/list to enumerate tools
+      - tools/call to invoke a tool
+    """
+
     def __init__(self, command: str, args: Optional[list] = None, cwd: Optional[str] = None, env: Optional[dict] = None):
         self.command = command
         self.args = args or []
         self.cwd = cwd
         self.env = env
-        self.proc: Optional[subprocess.Popen] = None
+        self._proc: Optional[asyncio.subprocess.Process] = None
         self._handlers: Dict[str, Callable] = {}
         self._reader_task: Optional[asyncio.Task] = None
+        self._pending: Dict[int, asyncio.Future] = {}
+        self._next_id = 1
+        self._read_buf = b""
+
+    # ---- low-level JSON-RPC over stdio ----
+
+    async def _send(self, msg: dict):
+        """Send a JSON-RPC message as newline-delimited JSON."""
+        if not self._proc or not self._proc.stdin:
+            raise TransportError("stdio process not running")
+        body = json.dumps(msg).encode("utf-8") + b"\n"
+        self._proc.stdin.write(body)
+        await self._proc.stdin.drain()
+
+    async def _read_message(self) -> Optional[dict]:
+        """Read one JSON-RPC message from stdout.
+
+        Supports both newline-delimited JSON (MCP Python SDK / FastMCP)
+        and Content-Length framed (LSP-style) messages.
+        """
+        if not self._proc or not self._proc.stdout:
+            return None
+        while True:
+            line = await self._proc.stdout.readline()
+            if not line:
+                return None  # EOF
+            line_str = line.decode("utf-8", errors="replace").strip()
+            if not line_str:
+                continue  # skip blank lines
+            # Content-Length framed message (LSP-style)
+            if line_str.startswith("Content-Length:"):
+                length = int(line_str.split(":", 1)[1].strip())
+                # consume blank line after headers
+                while True:
+                    sep = await self._proc.stdout.readline()
+                    if sep.strip() == b"":
+                        break
+                body = await self._proc.stdout.readexactly(length)
+                return json.loads(body)
+            # Newline-delimited JSON
+            try:
+                return json.loads(line_str)
+            except json.JSONDecodeError:
+                continue  # skip non-JSON lines (e.g. server log output)
+
+    async def _request(self, method: str, params: Optional[dict] = None) -> Any:
+        """Send a JSON-RPC request and wait for the response."""
+        rid = self._next_id
+        self._next_id += 1
+        msg = {"jsonrpc": "2.0", "id": rid, "method": method}
+        if params is not None:
+            msg["params"] = params
+
+        future: asyncio.Future = asyncio.get_event_loop().create_future()
+        self._pending[rid] = future
+        await self._send(msg)
+
+        # read messages until we get our response
+        while not future.done():
+            resp = await self._read_message()
+            if resp is None:
+                future.set_exception(TransportError("stdio process closed"))
+                break
+            resp_id = resp.get("id")
+            if resp_id is not None and resp_id in self._pending:
+                pending_future = self._pending.pop(resp_id)
+                if "error" in resp:
+                    pending_future.set_exception(
+                        TransportError(f"JSON-RPC error: {resp['error']}")
+                    )
+                else:
+                    pending_future.set_result(resp.get("result"))
+            elif resp.get("method") == "notifications/message":
+                # server notification — dispatch if handler registered
+                ntype = (resp.get("params") or {}).get("type")
+                if ntype and ntype in self._handlers:
+                    asyncio.create_task(self._handlers[ntype](resp.get("params", {})))
+
+        return future.result()
+
+    async def _notify(self, method: str, params: Optional[dict] = None):
+        """Send a JSON-RPC notification (no id, no response expected)."""
+        msg = {"jsonrpc": "2.0", "method": method}
+        if params is not None:
+            msg["params"] = params
+        await self._send(msg)
+
+    # ---- Transport interface ----
 
     async def connect(self):
-        # spawn subprocess with pipes
-        self.proc = subprocess.Popen([self.command] + self.args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=self.cwd, env=self.env, text=True)
-        loop = asyncio.get_event_loop()
-        def read_stdout():
-            if not self.proc or not self.proc.stdout:
-                return
-            for line in self.proc.stdout:
-                line = line.strip()
-                if not line:
-                    continue
+        self._proc = await asyncio.create_subprocess_exec(
+            self.command, *self.args,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=self.cwd,
+            env=self.env,
+        )
+        # MCP initialize handshake (with timeout to avoid hanging forever)
+        try:
+            result = await asyncio.wait_for(self._request("initialize", {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "tcode", "version": "0.1.0"},
+            }), timeout=30)
+        except asyncio.TimeoutError:
+            # collect any stderr output for diagnostics
+            stderr_out = ""
+            if self._proc and self._proc.stderr:
                 try:
-                    obj = json.loads(line)
+                    stderr_out = (await asyncio.wait_for(
+                        self._proc.stderr.read(4096), timeout=1
+                    )).decode("utf-8", errors="replace")
                 except Exception:
-                    continue
-                ntype = obj.get('type')
-                if ntype and ntype in self._handlers:
-                    asyncio.run_coroutine_threadsafe(self._handlers[ntype](obj), loop)
-        self._reader_task = asyncio.get_event_loop().run_in_executor(None, read_stdout)
+                    pass
+            await self.close()
+            raise TransportError(
+                f"Timeout waiting for MCP server to respond to initialize. "
+                f"Command: {self.command} {' '.join(self.args)}"
+                + (f"\nstderr: {stderr_out}" if stderr_out else "")
+            )
+        # send initialized notification
+        await self._notify("notifications/initialized")
 
     async def close(self):
-        if self.proc:
-            self.proc.terminate()
-            self.proc = None
-        if self._reader_task:
-            self._reader_task.cancel()
-            self._reader_task = None
-
-    async def finish_auth(self, code: str):
-        # send code via stdin if subprocess supports it
-        if self.proc and self.proc.stdin:
+        if self._proc:
             try:
-                self.proc.stdin.write(code + "\n")
-                self.proc.stdin.flush()
+                self._proc.stdin.close()
             except Exception:
                 pass
+            try:
+                self._proc.terminate()
+                await asyncio.wait_for(self._proc.wait(), timeout=5)
+            except Exception:
+                try:
+                    self._proc.kill()
+                except Exception:
+                    pass
+            self._proc = None
+
+    async def finish_auth(self, code: str):
+        pass  # stdio transports don't use OAuth
 
     def subscribe_notification(self, notification: str, handler: Callable[[Dict[str,Any]], Awaitable[None]]):
         self._handlers[notification] = handler
+
+    # ---- MCP tool interface ----
+
+    async def list_tools(self) -> list:
+        """Call tools/list and return the tool definitions."""
+        result = await self._request("tools/list")
+        return (result or {}).get("tools", [])
+
+    async def call_tool(self, name: str, args: Dict[str, Any], stream: bool = False):
+        """Call tools/call and yield the result."""
+        result = await self._request("tools/call", {"name": name, "arguments": args})
+        # MCP tools/call returns {"content": [{"type":"text","text":"..."},...]}
+        content = (result or {}).get("content", [])
+        text_parts = []
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "text":
+                text_parts.append(part.get("text", ""))
+        output = "\n".join(text_parts) if text_parts else json.dumps(result)
+        yield {"text": output}

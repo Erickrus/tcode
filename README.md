@@ -29,6 +29,8 @@ tcode is an interactive AI coding assistant that runs entirely in your terminal.
 
 It is a Python implementation inspired by [OpenCode](https://github.com/anomalyco/opencode), built from the ground up with async-first design and a modular provider system.
 
+<img src="https://github.com/Erickrus/tcode/blob/main/tcode.gif?raw=true" width=800px />
+
 ## Why tcode
 
 - **Provider-agnostic.** Not locked to a single vendor. Use Anthropic, OpenAI, Google, Azure, Ollama, or any OpenAI-compatible endpoint. Switch models with a flag.

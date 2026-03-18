@@ -30,7 +30,7 @@ tcode is an interactive AI coding assistant that runs entirely in your terminal.
 
 <img src="https://github.com/Erickrus/tcode/blob/main/tcode.gif?raw=true" width=800px />
 
-## Why tcode
+## tcode
 
 - **Provider-agnostic.** Not locked to a single vendor. Use Anthropic, OpenAI, Google, Azure, Ollama, or any OpenAI-compatible endpoint. Switch models with a flag.
 - **Terminal-native.** Full-screen TUI with streaming, inline diffs, shell mode, and native text selection. No browser, no Electron, no GUI dependencies.

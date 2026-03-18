@@ -27,7 +27,6 @@
 
 tcode is an interactive AI coding assistant that runs entirely in your terminal. It connects to the LLM provider of your choice, executes tools on your behalf, and renders everything in a full-screen terminal UI with streaming responses, inline diffs, and permission controls.
 
-It is a Python implementation inspired by [OpenCode](https://github.com/anomalyco/opencode), built from the ground up with async-first design and a modular provider system.
 
 <img src="https://github.com/Erickrus/tcode/blob/main/tcode.gif?raw=true" width=800px />
 

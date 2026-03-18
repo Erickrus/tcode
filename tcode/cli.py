@@ -49,6 +49,7 @@ class TcodeCLI:
         self.db_path = db_path
         self.session_id: Optional[str] = None
         self.abort_event: Optional[asyncio.Event] = None
+        self.tui_mode: bool = False  # suppress print output when True
 
         # Components (initialized in setup)
         self.config = None
@@ -223,7 +224,7 @@ class TcodeCLI:
 
     def _subscribe_events(self):
         """Subscribe to events for terminal output."""
-        self.events.subscribe("permission.requested", self._handle_permission)
+        self._unsub_permission = self.events.subscribe("permission.requested", self._handle_permission)
 
     async def _handle_permission(self, ev: Event):
         """Handle permission requests interactively."""
@@ -300,7 +301,8 @@ class TcodeCLI:
         # Abort event
         self.abort_event = asyncio.Event()
 
-        print(f"\033[2m[{pid}/{mid}] thinking...\033[0m")
+        if not self.tui_mode:
+            print(f"\033[2m[{pid}/{mid}] thinking...\033[0m")
 
         # Run agent
         result = await self.agent_runner.run(
@@ -315,7 +317,7 @@ class TcodeCLI:
 
         # Print result
         final_text = result.get("final_text", "")
-        if final_text:
+        if final_text and not self.tui_mode:
             print(f"\n{final_text}")
 
         # Print stats
@@ -336,7 +338,7 @@ class TcodeCLI:
         if blocked:
             stats_parts.append("BLOCKED")
 
-        if stats_parts:
+        if stats_parts and not self.tui_mode:
             print(f"\033[2m[{' | '.join(stats_parts)}]\033[0m")
 
         return result
@@ -596,29 +598,35 @@ async def async_main():
         "-v", "--verbose", action="store_true",
         help="Verbose mode: log tool invocations and other debug info",
     )
+    parser.add_argument(
+        "--repl", action="store_true",
+        help="Use the old line-based REPL instead of the TUI",
+    )
+    parser.add_argument(
+        "--tui", action="store_true",
+        help="Use the full-screen TUI (default for interactive mode)",
+    )
 
     args = parser.parse_args()
-    print(banner)
-    cli = TcodeCLI(project_dir=args.dir, db_path=args.db)
 
-    # Handle Ctrl+C gracefully
-    def signal_handler(sig, frame):
-        if cli.abort_event:
-            cli.abort_event.set()
-        else:
-            print("\nBye.")
-            sys.exit(0)
+    if args.prompt:
+        # Single-shot mode — no TUI
+        print(banner)
+        cli = TcodeCLI(project_dir=args.dir, db_path=args.db)
 
-    signal.signal(signal.SIGINT, signal_handler)
+        def signal_handler(sig, frame):
+            if cli.abort_event:
+                cli.abort_event.set()
+            else:
+                print("\nBye.")
+                sys.exit(0)
 
-    try:
-        await cli.setup()
+        signal.signal(signal.SIGINT, signal_handler)
 
-        if args.verbose:
-            cli.agent_runner.toolrunner.verbose = True
-
-        if args.prompt:
-            # Single-shot mode
+        try:
+            await cli.setup()
+            if args.verbose:
+                cli.agent_runner.toolrunner.verbose = True
             prompt_text = " ".join(args.prompt)
             await cli.new_session()
             await cli.send(
@@ -628,16 +636,46 @@ async def async_main():
                 agent_name=args.agent,
                 system_prompt=args.system,
             )
-        else:
-            # Interactive REPL
+        finally:
+            await cli.teardown()
+
+    elif args.repl:
+        # Old REPL mode
+        print(banner)
+        cli = TcodeCLI(project_dir=args.dir, db_path=args.db)
+
+        def signal_handler(sig, frame):
+            if cli.abort_event:
+                cli.abort_event.set()
+            else:
+                print("\nBye.")
+                sys.exit(0)
+
+        signal.signal(signal.SIGINT, signal_handler)
+
+        try:
+            await cli.setup()
+            if args.verbose:
+                cli.agent_runner.toolrunner.verbose = True
             await cli.repl(
                 provider_id=args.provider,
                 model_id=args.model,
                 agent_name=args.agent,
                 system_prompt=args.system,
             )
-    finally:
-        await cli.teardown()
+        finally:
+            await cli.teardown()
+
+    else:
+        # TUI mode (default)
+        from tcode_app import TcodeApp
+        tui_app = TcodeApp(args)
+        try:
+            await tui_app._run_async()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            tui_app._shutdown()
 
 
 def main():

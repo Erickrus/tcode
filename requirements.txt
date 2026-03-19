@@ -1,0 +1,18 @@
+# tcode core dependencies
+pydantic>=2.0
+httpx>=0.27
+fastapi>=0.110
+uvicorn>=0.30
+
+# LLM provider SDKs (official packages)
+openai>=2.0
+anthropic>=0.80
+ollama>=0.4
+google-generativeai>=0.8
+
+# TUI framework
+runtui>=0.1.0
+
+# testing
+pytest>=8.0
+pytest-asyncio>=1.0

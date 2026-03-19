@@ -54,7 +54,9 @@ class MessageList(Widget):
         perm = self.state.pending_permission
         perm_height = 0
         if perm:
-            perm_height = 4  # fixed height for permission prompt
+            # 1 header + up to 2 detail lines + 1 hint line
+            detail_count = min(2, len(perm.get("details", {}))) if isinstance(perm.get("details"), dict) else 0
+            perm_height = 2 + detail_count
 
         self._total_height = sum(row_heights) + perm_height
 
@@ -63,8 +65,13 @@ class MessageList(Widget):
             self._auto_scroll = True
             self._last_msg_count = len(messages)
 
+        # Clamp scroll offset to valid range (handles permission disappearing, resize, etc.)
+        max_scroll = max(0, self._total_height - h)
+        if self._scroll_offset > max_scroll:
+            self._scroll_offset = max_scroll
+
         if self._auto_scroll:
-            self._scroll_offset = max(0, self._total_height - h)
+            self._scroll_offset = max_scroll
 
         # Render visible messages
         content_painter = painter.sub_painter(lx + 1, ly, content_width, h)

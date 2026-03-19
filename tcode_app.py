@@ -199,6 +199,11 @@ class TcodeApp(App):
         pass
 
     def _handle_resize(self, event: ResizeEvent) -> None:
+        # Clear terminal to prevent artifacts from old dimensions
+        if self._backend:
+            self._backend.write("\x1b[2J\x1b[H")  # clear screen + cursor home
+            self._backend.flush()
+
         if self._screen:
             self._screen.resize(event.width, event.height)
         if self.root:
@@ -206,6 +211,20 @@ class TcodeApp(App):
             self.root.height = event.height
             self.root._screen_rect = Rect(0, 0, event.width, event.height)
             self.root.arrange(self.root._screen_rect)
+
+            # Force child screens to re-layout with new dimensions
+            active_screen = self._session_screen if self.state.screen == "session" else self._home_screen
+            if active_screen and hasattr(active_screen, '_screen_rect'):
+                active_screen.arrange(active_screen._screen_rect)
+
+            # Reset scroll state so MessageList recalculates for new size
+            if self._session_screen:
+                msg_list = self._session_screen.find_by_id("message_list")
+                if not msg_list:
+                    msg_list = getattr(self._session_screen, '_message_list', None)
+                if msg_list and hasattr(msg_list, '_auto_scroll'):
+                    msg_list._auto_scroll = True
+
         self.invalidate_all()
 
     def _handle_key(self, event: KeyEvent) -> None:
@@ -245,6 +264,18 @@ class TcodeApp(App):
             if event.key == Keys.CHAR and event.char in ("y", "n", "a"):
                 allow = event.char in ("y", "a")
                 always = event.char == "a"
+                # Show what was selected
+                perm_type = self.state.pending_permission.get("type", "")
+                if event.char == "y":
+                    label = "Allowed"
+                elif event.char == "a":
+                    label = "Always allowed"
+                else:
+                    label = "Denied"
+                self.state.messages.append({
+                    "type": "system",
+                    "text": f"{label}: {perm_type}",
+                })
                 if self.bridge:
                     asyncio.create_task(self.bridge.respond_permission(allow, always))
                 event.mark_handled()

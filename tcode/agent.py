@@ -156,241 +156,259 @@ class AgentRunner:
         # Track recent tool calls for doom loop detection
         recent_tool_calls: List[Dict[str, Any]] = []
 
-        while step < max_steps:
-            step += 1
+        try:
+            while step < max_steps:
+                step += 1
 
-            # Emit step-start part
-            await self.sessions.insert_step_start_part(session_id, assistant_msg_id)
+                # Emit step-start part
+                await self.sessions.insert_step_start_part(session_id, assistant_msg_id)
 
-            # Compose full message history including tool calls and results
-            messages = await self.sessions.compose_messages(
-                session_id, system_prompt=system_prompt
-            )
+                # Compose full message history including tool calls and results
+                messages = await self.sessions.compose_messages(
+                    session_id, system_prompt=system_prompt
+                )
 
-            # Stream from provider
-            tool_calls_this_turn: List[Dict[str, Any]] = []
-            text_this_turn = ""
-            had_error = False
-            should_retry = False
-            step_usage: Dict[str, Any] = {}
-            finish_reason = ""
+                # Stream from provider
+                tool_calls_this_turn: List[Dict[str, Any]] = []
+                text_this_turn = ""
+                had_error = False
+                should_retry = False
+                step_usage: Dict[str, Any] = {}
+                finish_reason = ""
 
-            # Track tool call accumulation (for streaming fragments)
-            active_tool_calls: Dict[str, Dict[str, Any]] = {}
+                # Track tool call accumulation (for streaming fragments)
+                active_tool_calls: Dict[str, Dict[str, Any]] = {}
 
-            async for chunk in adapter.chat_stream(messages, model, options, tools=tool_schemas or None):
-                # Check abort signal
-                if abort_event and abort_event.is_set():
-                    break
+                async for chunk in adapter.chat_stream(messages, model, options, tools=tool_schemas or None):
+                    # Check abort signal
+                    if abort_event and abort_event.is_set():
+                        break
 
-                ctype = chunk.get("type")
+                    ctype = chunk.get("type")
 
-                if ctype == "delta":
-                    text = chunk.get("text", "")
-                    if text:
-                        text_this_turn += text
-                        final_text += text
+                    if ctype == "delta":
+                        text = chunk.get("text", "")
+                        if text:
+                            text_this_turn += text
+                            final_text += text
 
-                elif ctype == "tool_call_start":
-                    tc_id = chunk.get("id", next_id("call"))
-                    active_tool_calls[tc_id] = {
-                        "id": tc_id,
-                        "name": chunk.get("name", ""),
-                        "arguments_fragments": [],
-                    }
-
-                elif ctype == "tool_call_delta":
-                    tc_id = chunk.get("id", "")
-                    if tc_id in active_tool_calls:
-                        active_tool_calls[tc_id]["arguments_fragments"].append(
-                            chunk.get("arguments", "")
-                        )
-
-                elif ctype == "tool_call_end":
-                    tc_id = chunk.get("id", next_id("call"))
-                    tool_calls_this_turn.append({
-                        "id": tc_id,
-                        "name": chunk.get("name", ""),
-                        "arguments": chunk.get("arguments", {}),
-                    })
-
-                elif ctype == "usage":
-                    # Capture token usage from provider
-                    step_usage = {
-                        "input": chunk.get("input_tokens", 0) or 0,
-                        "output": chunk.get("output_tokens", 0) or 0,
-                        "reasoning": chunk.get("reasoning_tokens", 0) or 0,
-                        "cache": {
-                            "read": chunk.get("cache_read_tokens", 0) or 0,
-                            "write": chunk.get("cache_creation_tokens", 0) or 0,
-                        },
-                    }
-
-                elif ctype == "error":
-                    raw_error = chunk.get("error", "Unknown provider error")
-                    if isinstance(raw_error, Exception):
-                        error_dict = map_provider_error(raw_error)
-                    elif isinstance(raw_error, dict):
-                        error_dict = raw_error
-                    else:
-                        error_dict = {"type": "api_error", "message": str(raw_error), "retryable": False}
-
-                    if is_retryable(error_dict) and retry_attempt < MAX_RETRIES:
-                        retry_attempt += 1
-                        delay = retry_delay(retry_attempt, error_dict)
-                        # Record retry part (strip non-serializable exception object)
-                        serializable_error = {
-                            k: v for k, v in error_dict.items()
-                            if k != "error"
+                    elif ctype == "tool_call_start":
+                        tc_id = chunk.get("id", next_id("call"))
+                        active_tool_calls[tc_id] = {
+                            "id": tc_id,
+                            "name": chunk.get("name", ""),
+                            "arguments_fragments": [],
                         }
-                        await self.sessions.insert_retry_part(
-                            session_id, assistant_msg_id,
-                            attempt=retry_attempt, error=serializable_error,
-                        )
-                        await self.events.publish(Event.create(
-                            "session.status.changed",
-                            {"status": "retry", "attempt": retry_attempt,
-                             "message": error_dict.get("message", ""),
-                             "next_retry_in": delay},
-                            session_id=session_id,
-                        ))
-                        try:
-                            await retry_sleep(delay, abort_event)
-                        except AbortedError:
+
+                    elif ctype == "tool_call_delta":
+                        tc_id = chunk.get("id", "")
+                        if tc_id in active_tool_calls:
+                            active_tool_calls[tc_id]["arguments_fragments"].append(
+                                chunk.get("arguments", "")
+                            )
+
+                    elif ctype == "tool_call_end":
+                        tc_id = chunk.get("id", next_id("call"))
+                        tool_calls_this_turn.append({
+                            "id": tc_id,
+                            "name": chunk.get("name", ""),
+                            "arguments": chunk.get("arguments", {}),
+                        })
+
+                    elif ctype == "usage":
+                        # Capture token usage from provider
+                        step_usage = {
+                            "input": chunk.get("input_tokens", 0) or 0,
+                            "output": chunk.get("output_tokens", 0) or 0,
+                            "reasoning": chunk.get("reasoning_tokens", 0) or 0,
+                            "cache": {
+                                "read": chunk.get("cache_read_tokens", 0) or 0,
+                                "write": chunk.get("cache_creation_tokens", 0) or 0,
+                            },
+                        }
+
+                    elif ctype == "error":
+                        raw_error = chunk.get("error", "Unknown provider error")
+                        if isinstance(raw_error, Exception):
+                            error_dict = map_provider_error(raw_error)
+                        elif isinstance(raw_error, dict):
+                            error_dict = raw_error
+                        else:
+                            error_dict = {"type": "api_error", "message": str(raw_error), "retryable": False}
+
+                        if is_retryable(error_dict) and retry_attempt < MAX_RETRIES:
+                            retry_attempt += 1
+                            delay = retry_delay(retry_attempt, error_dict)
+                            # Record retry part (strip non-serializable exception object)
+                            serializable_error = {
+                                k: v for k, v in error_dict.items()
+                                if k != "error"
+                            }
+                            await self.sessions.insert_retry_part(
+                                session_id, assistant_msg_id,
+                                attempt=retry_attempt, error=serializable_error,
+                            )
+                            await self.events.publish(Event.create(
+                                "session.status.changed",
+                                {"status": "retry", "attempt": retry_attempt,
+                                 "message": error_dict.get("message", ""),
+                                 "next_retry_in": delay},
+                                session_id=session_id,
+                            ))
+                            try:
+                                await retry_sleep(delay, abort_event)
+                            except AbortedError:
+                                had_error = True
+                                break
+                            should_retry = True
+                            break
+                        else:
+                            error_msg = str(error_dict.get("message", "Unknown provider error"))
+                            error_text = f"[Provider error: {error_msg}]"
+                            await self.sessions.append_text_part(
+                                session_id, assistant_msg_id,
+                                error_text, synthetic=True
+                            )
+                            final_text += error_text
                             had_error = True
                             break
-                        should_retry = True
-                        break
-                    else:
-                        error_msg = str(error_dict.get("message", "Unknown provider error"))
-                        error_text = f"[Provider error: {error_msg}]"
-                        await self.sessions.append_text_part(
-                            session_id, assistant_msg_id,
-                            error_text, synthetic=True
-                        )
-                        final_text += error_text
-                        had_error = True
+
+                    elif ctype == "final":
+                        finish_reason = "stop" if not tool_calls_this_turn else "tool_calls"
                         break
 
-                elif ctype == "final":
-                    finish_reason = "stop" if not tool_calls_this_turn else "tool_calls"
+                # If retrying, skip the rest and re-enter the loop
+                if should_retry:
+                    active_tool_calls.clear()
+                    step -= 1  # Don't count retries as steps
+                    continue
+
+                # Accumulate token usage
+                if step_usage:
+                    total_tokens["input"] += step_usage.get("input", 0)
+                    total_tokens["output"] += step_usage.get("output", 0)
+                    total_tokens["reasoning"] += step_usage.get("reasoning", 0)
+                    total_tokens["cache"]["read"] += step_usage.get("cache", {}).get("read", 0)
+                    total_tokens["cache"]["write"] += step_usage.get("cache", {}).get("write", 0)
+
+                # Calculate step cost
+                step_cost = self._calculate_cost(model, step_usage)
+                total_cost += step_cost
+
+                # Emit step-finish part with usage data
+                if not finish_reason:
+                    finish_reason = "tool_calls" if tool_calls_this_turn else "stop"
+                await self.sessions.insert_step_finish_part(
+                    session_id, assistant_msg_id,
+                    reason=finish_reason, cost=step_cost,
+                    tokens=step_usage or {"input": 0, "output": 0, "reasoning": 0, "cache": {"read": 0, "write": 0}},
+                )
+
+                # On error, discard any incomplete tool calls and break immediately
+                if had_error:
+                    active_tool_calls.clear()
+                    if text_this_turn:
+                        await self.sessions.append_text_part(
+                            session_id, assistant_msg_id, text_this_turn
+                        )
                     break
 
-            # If retrying, skip the rest and re-enter the loop
-            if should_retry:
+                # Flush any active_tool_calls that weren't finalized via tool_call_end
+                for tc_id, tc_state in active_tool_calls.items():
+                    if not any(tc["id"] == tc_id for tc in tool_calls_this_turn):
+                        args_text = "".join(tc_state["arguments_fragments"])
+                        try:
+                            args_obj = json.loads(args_text) if args_text else {}
+                        except json.JSONDecodeError:
+                            args_obj = {"_raw": args_text}
+                        tool_calls_this_turn.append({
+                            "id": tc_id,
+                            "name": tc_state["name"],
+                            "arguments": args_obj,
+                        })
                 active_tool_calls.clear()
-                step -= 1  # Don't count retries as steps
-                continue
 
-            # Accumulate token usage
-            if step_usage:
-                total_tokens["input"] += step_usage.get("input", 0)
-                total_tokens["output"] += step_usage.get("output", 0)
-                total_tokens["reasoning"] += step_usage.get("reasoning", 0)
-                total_tokens["cache"]["read"] += step_usage.get("cache", {}).get("read", 0)
-                total_tokens["cache"]["write"] += step_usage.get("cache", {}).get("write", 0)
-
-            # Calculate step cost
-            step_cost = self._calculate_cost(model, step_usage)
-            total_cost += step_cost
-
-            # Emit step-finish part with usage data
-            if not finish_reason:
-                finish_reason = "tool_calls" if tool_calls_this_turn else "stop"
-            await self.sessions.insert_step_finish_part(
-                session_id, assistant_msg_id,
-                reason=finish_reason, cost=step_cost,
-                tokens=step_usage or {"input": 0, "output": 0, "reasoning": 0, "cache": {"read": 0, "write": 0}},
-            )
-
-            # Flush any active_tool_calls that weren't finalized via tool_call_end
-            for tc_id, tc_state in active_tool_calls.items():
-                if not any(tc["id"] == tc_id for tc in tool_calls_this_turn):
-                    args_text = "".join(tc_state["arguments_fragments"])
-                    try:
-                        args_obj = json.loads(args_text) if args_text else {}
-                    except json.JSONDecodeError:
-                        args_obj = {"_raw": args_text}
-                    tool_calls_this_turn.append({
-                        "id": tc_id,
-                        "name": tc_state["name"],
-                        "arguments": args_obj,
-                    })
-            active_tool_calls.clear()
-
-            # Store assistant text if any
-            if text_this_turn:
-                await self.sessions.append_text_part(
-                    session_id, assistant_msg_id, text_this_turn
-                )
-
-            # If no tool calls, we're done
-            if not tool_calls_this_turn:
-                break
-
-            # Doom loop detection: check if last 3 tool calls are identical
-            for tc in tool_calls_this_turn:
-                recent_tool_calls.append({"name": tc["name"], "arguments": tc["arguments"]})
-
-            if self._detect_doom_loop(recent_tool_calls, agent_info):
-                blocked = True
-                await self.sessions.append_text_part(
-                    session_id, assistant_msg_id,
-                    "[Doom loop detected: repeated identical tool calls. Stopping.]",
-                    synthetic=True,
-                )
-                break
-
-            # Execute tool calls
-            for tc in tool_calls_this_turn:
-                call_id = tc["id"]
-                tool_name = tc["name"]
-                tool_args = tc["arguments"]
-
-                part_id = await self.sessions.insert_tool_part(
-                    session_id, assistant_msg_id, call_id, tool_name, tool_args
-                )
-
-                try:
-                    result = await self.toolrunner.execute_tool(
-                        session_id, assistant_msg_id, call_id, tool_name, tool_args,
-                        timeout=120, part_id=part_id
+                # Store assistant text if any
+                if text_this_turn:
+                    await self.sessions.append_text_part(
+                        session_id, assistant_msg_id, text_this_turn
                     )
-                except PermissionRejectedError:
-                    # User rejected permission — set blocked and stop
+
+                # If no tool calls, we're done
+                if not tool_calls_this_turn:
+                    break
+
+                # Doom loop detection: check if last 3 tool calls are identical
+                for tc in tool_calls_this_turn:
+                    recent_tool_calls.append({"name": tc["name"], "arguments": tc["arguments"]})
+
+                if self._detect_doom_loop(recent_tool_calls, agent_info):
                     blocked = True
                     await self.sessions.append_text_part(
                         session_id, assistant_msg_id,
-                        f"[Permission rejected by user for tool: {tool_name}]",
+                        "[Doom loop detected: repeated identical tool calls. Stopping.]",
                         synthetic=True,
                     )
                     break
-                except PermissionDeniedError:
-                    # Rule denied permission — ToolRunner already updated part state
-                    pass
-                except Exception as e:
-                    # ToolRunner already updates part state to error
-                    pass
 
-            if blocked:
-                break
+                # Execute tool calls
+                for tc in tool_calls_this_turn:
+                    call_id = tc["id"]
+                    tool_name = tc["name"]
+                    tool_args = tc["arguments"]
 
-            # Check abort after tool execution
+                    part_id = await self.sessions.insert_tool_part(
+                        session_id, assistant_msg_id, call_id, tool_name, tool_args
+                    )
+
+                    try:
+                        result = await self.toolrunner.execute_tool(
+                            session_id, assistant_msg_id, call_id, tool_name, tool_args,
+                            timeout=120, part_id=part_id
+                        )
+                    except PermissionRejectedError:
+                        # User rejected permission — set blocked and stop
+                        blocked = True
+                        await self.sessions.append_text_part(
+                            session_id, assistant_msg_id,
+                            f"[Permission rejected by user for tool: {tool_name}]",
+                            synthetic=True,
+                        )
+                        break
+                    except PermissionDeniedError:
+                        # Rule denied permission — ToolRunner already updated part state
+                        pass
+                    except Exception as e:
+                        # ToolRunner already updates part state to error
+                        pass
+
+                if blocked:
+                    break
+
+                # Check abort after tool execution
+                if abort_event and abort_event.is_set():
+                    break
+
+                # Compaction check
+                await self._try_compact(session_id)
+
+        except Exception as e:
+            # Unhandled error — record it so the UI can show something
+            error_text = f"[Unexpected error: {e}]"
+            try:
+                await self.sessions.append_text_part(
+                    session_id, assistant_msg_id, error_text, synthetic=True
+                )
+            except Exception:
+                pass
+            final_text += error_text
+        finally:
+            # If aborted, mark any pending tool parts as error
             if abort_event and abort_event.is_set():
-                break
+                await self._cleanup_pending_tools(session_id, assistant_msg_id)
 
-            # Compaction check
-            await self._try_compact(session_id)
-
-            if had_error:
-                break
-
-        # If aborted, mark any pending tool parts as error
-        if abort_event and abort_event.is_set():
-            await self._cleanup_pending_tools(session_id, assistant_msg_id)
-
-        # Set session back to idle
-        await self.sessions.set_session_status(session_id, "idle")
+            # Always set session back to idle
+            await self.sessions.set_session_status(session_id, "idle")
 
         return {
             "message_id": assistant_msg_id,

@@ -1,7 +1,7 @@
 {
   "provider": {
     "litellm": {
-      "base_url": "https://a8b9-34-169-145-105.ngrok-free.app/v1"
+      "base_url": "http://localhost:4000/v1"
     },
     "ollama": {
       "base_url": "http://127.0.0.1:11434/v1"

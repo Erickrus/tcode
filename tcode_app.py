@@ -79,7 +79,7 @@ class TcodeApp(App):
 
         # Setup tcode backend
         from tcode.cli import TcodeCLI
-        self._cli = TcodeCLI(project_dir=self.args.dir, db_path=self.args.db)
+        self._cli = TcodeCLI(project_dir=self.args.dir)
         self._cli.tui_mode = True
         try:
             await self._cli.setup()
@@ -264,8 +264,23 @@ class TcodeApp(App):
             if event.key == Keys.CHAR and event.char in ("y", "n", "a"):
                 allow = event.char in ("y", "a")
                 always = event.char == "a"
-                # Show what was selected
-                perm_type = self.state.pending_permission.get("type", "")
+                # Show what was selected with key detail
+                perm = self.state.pending_permission
+                perm_type = perm.get("type", "")
+                details = perm.get("details", {})
+                # Extract the most relevant detail for the summary
+                detail_summary = ""
+                if isinstance(details, dict):
+                    path = details.get("path") or details.get("file_path") or ""
+                    cmd = details.get("cmd") or ""
+                    url = details.get("url") or ""
+                    if path:
+                        detail_summary = f" ({path})"
+                    elif cmd:
+                        s = str(cmd)
+                        detail_summary = f" ({s[:60]}{'...' if len(s) > 60 else ''})"
+                    elif url:
+                        detail_summary = f" ({url})"
                 if event.char == "y":
                     label = "Allowed"
                 elif event.char == "a":
@@ -274,7 +289,7 @@ class TcodeApp(App):
                     label = "Denied"
                 self.state.messages.append({
                     "type": "system",
-                    "text": f"{label}: {perm_type}",
+                    "text": f"{label}: {perm_type}{detail_summary}",
                 })
                 if self.bridge:
                     asyncio.create_task(self.bridge.respond_permission(allow, always))

@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+dist/
+build/
+*.whl
+
+# Virtual environment
+bin/
+lib/
+include/
+pyvenv.cfg
+pip-selfcheck.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# tcode runtime
+.tcode/sessions/
+.tcode/*.db
+
+# Testing
+.pytest_cache/
+htmlcov/
+.coverage

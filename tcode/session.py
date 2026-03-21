@@ -464,15 +464,41 @@ class SessionManager:
         result: List[Dict[str, Any]] = []
 
         # System prompt: explicit param > session metadata
+        # Then append project instructions and memory index.
+        base_prompt = None
         if system_prompt:
-            result.append({"role": "system", "content": system_prompt})
+            base_prompt = system_prompt
         else:
             sess = await self.storage.get_session(session_id)
             if sess:
                 meta = sess.get("metadata") or {}
-                sys_p = meta.get("system_prompt")
-                if sys_p:
-                    result.append({"role": "system", "content": sys_p})
+                base_prompt = meta.get("system_prompt")
+
+        # Build augmented system prompt with instructions + memory index
+        from .memory import instructions_for_prompt, memory_for_prompt
+        from .config import get_config
+
+        prompt_parts = []
+        if base_prompt:
+            prompt_parts.append(base_prompt)
+
+        try:
+            cfg = get_config()
+            instr_block = instructions_for_prompt(cfg.instructions)
+            if instr_block:
+                prompt_parts.append(instr_block)
+        except Exception:
+            pass
+
+        try:
+            mem_block = memory_for_prompt(self.storage.base_dir)
+            if mem_block:
+                prompt_parts.append(mem_block)
+        except Exception:
+            pass
+
+        if prompt_parts:
+            result.append({"role": "system", "content": "\n\n".join(prompt_parts)})
 
         async for wp in self.stream_messages(session_id):
             info = wp.info

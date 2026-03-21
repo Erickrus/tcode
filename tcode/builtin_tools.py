@@ -366,6 +366,92 @@ async def task_execute(args: Dict[str, Any], ctx: ToolContext) -> ToolResult:
         return ToolResult(title="task", output=f"Error running subagent: {e}")
 
 
+# ---- Memory tools ----
+
+from . import memory as _memory
+
+class MemoryReadParams(BaseModel):
+    title_substring: Optional[str] = None
+
+async def memory_read_execute(args: Dict[str, Any], ctx: ToolContext) -> ToolResult:
+    _verbose_log(ctx, "memory_read", args)
+    sessions = ctx.extra.get("sessions") if ctx.extra else None
+    if not sessions:
+        return ToolResult(title="memory_read", output="Error: no session context")
+    base_dir = sessions.storage.base_dir
+    title_sub = args.get("title_substring")
+    if title_sub:
+        entries = _memory.search_entries(base_dir, title_sub)
+        if not entries:
+            return ToolResult(title="memory_read", output="No entries matching: " + title_sub)
+        return ToolResult(title="memory_read", output=_memory.format_entries(entries))
+    content = _memory.read_memory(base_dir)
+    if not content:
+        return ToolResult(title="memory_read", output="No project memory file found.")
+    return ToolResult(title="memory_read", output=content)
+
+
+class MemoryWriteParams(BaseModel):
+    title: Optional[str] = None
+    body: Optional[str] = None
+    replace_all: bool = False
+    full_content: Optional[str] = None
+
+async def memory_write_execute(args: Dict[str, Any], ctx: ToolContext) -> ToolResult:
+    _verbose_log(ctx, "memory_write", args)
+    sessions = ctx.extra.get("sessions") if ctx.extra else None
+    if not sessions:
+        return ToolResult(title="memory_write", output="Error: no session context")
+    base_dir = sessions.storage.base_dir
+    replace_all = args.get("replace_all", False)
+    full_content = args.get("full_content")
+    if replace_all and full_content is not None:
+        _memory.write_memory(base_dir, full_content)
+        entries = _memory.parse_entries(full_content)
+        return ToolResult(title="memory_write", output=f"Memory replaced ({len(entries)} entries)")
+    title = args.get("title")
+    body = args.get("body", "")
+    if not title:
+        return ToolResult(title="memory_write", output="Error: title is required when not using replace_all")
+    entry = _memory.add_entry(base_dir, title, body)
+    return ToolResult(
+        title="memory_write",
+        output=f"Saved: [{entry['timestamp']}] {entry['title']}",
+    )
+
+
+class MemoryDeleteParams(BaseModel):
+    title_substring: str
+
+async def memory_delete_execute(args: Dict[str, Any], ctx: ToolContext) -> ToolResult:
+    _verbose_log(ctx, "memory_delete", args)
+    sessions = ctx.extra.get("sessions") if ctx.extra else None
+    if not sessions:
+        return ToolResult(title="memory_delete", output="Error: no session context")
+    base_dir = sessions.storage.base_dir
+    title_sub = args.get("title_substring", "")
+    removed = _memory.delete_entry(base_dir, title_sub)
+    if removed == 0:
+        return ToolResult(title="memory_delete", output=f"No entries matching: {title_sub}")
+    return ToolResult(title="memory_delete", output=f"Deleted {removed} entry(ies) matching: {title_sub}")
+
+
+class MemorySearchParams(BaseModel):
+    query: str
+
+async def memory_search_execute(args: Dict[str, Any], ctx: ToolContext) -> ToolResult:
+    _verbose_log(ctx, "memory_search", args)
+    sessions = ctx.extra.get("sessions") if ctx.extra else None
+    if not sessions:
+        return ToolResult(title="memory_search", output="Error: no session context")
+    base_dir = sessions.storage.base_dir
+    query = args.get("query", "")
+    entries = _memory.search_entries(base_dir, query)
+    if not entries:
+        return ToolResult(title="memory_search", output=f"No entries matching: {query}")
+    return ToolResult(title="memory_search", output=_memory.format_entries(entries))
+
+
 # register all tools
 def register_builtin_tools(registry: ToolRegistry):
     registry.register(ToolInfo(id="builtin_echo", description="Echo text", parameters=EchoParams, execute=echo_execute, permission="low"))
@@ -384,6 +470,36 @@ def register_builtin_tools(registry: ToolRegistry):
     registry.register(ToolInfo(id="builtin_todowrite", description="Write/replace all todos for the session", parameters=TodoWriteParams, execute=todowrite_execute, permission="low"))
     registry.register(ToolInfo(id="builtin_todoread", description="Read all todos for the session", parameters=TodoReadParams, execute=todoread_execute, permission="low"))
     registry.register(ToolInfo(id="builtin_task", description="Spawn a subagent in a child session", parameters=TaskParams, execute=task_execute, permission="high"))
+
+    # Memory tools (permission="none" — internal agent tools, skip permission checks)
+    registry.register(ToolInfo(
+        id="builtin_memory_read",
+        description="Read project memory. Returns full content or entries matching title_substring. Use when the system prompt shows a memory index and you need details.",
+        parameters=MemoryReadParams,
+        execute=memory_read_execute,
+        permission="none",
+    ))
+    registry.register(ToolInfo(
+        id="builtin_memory_write",
+        description="Save important project context for future sessions: conventions, preferences, architecture decisions. Use replace_all=True with full_content to consolidate entries.",
+        parameters=MemoryWriteParams,
+        execute=memory_write_execute,
+        permission="none",
+    ))
+    registry.register(ToolInfo(
+        id="builtin_memory_delete",
+        description="Remove outdated or incorrect memory entries by title match (case-insensitive substring).",
+        parameters=MemoryDeleteParams,
+        execute=memory_delete_execute,
+        permission="none",
+    ))
+    registry.register(ToolInfo(
+        id="builtin_memory_search",
+        description="Search project memory entries by keyword (case-insensitive, grep-style). Returns matching entries with full content.",
+        parameters=MemorySearchParams,
+        execute=memory_search_execute,
+        permission="none",
+    ))
 
 # module-level plan_exit implementation so tests can import it
 async def plan_exit_execute(args: Dict[str, Any], ctx: ToolContext) -> ToolResult:

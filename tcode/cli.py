@@ -466,6 +466,28 @@ class TcodeCLI:
                 except Exception as e:
                     print(f"Compaction failed: {e}")
                 continue
+            elif text == "/memory" or text == "/memory show":
+                from .memory import read_memory
+                content = read_memory(self.storage.base_dir)
+                if content:
+                    print(content)
+                else:
+                    print("No project memory. Use memory_write tool or 'remember X' to create entries.")
+                continue
+            elif text == "/memory compact":
+                try:
+                    from .memory import consolidate_memory
+                    new_content = await consolidate_memory(
+                        self.storage.base_dir, self.provider_factory,
+                        provider_id=pid, model=mid,
+                    )
+                    print("Memory consolidated.")
+                    from .memory import parse_entries
+                    entries = parse_entries(new_content)
+                    print(f"  {len(entries)} entries remaining.")
+                except Exception as e:
+                    print(f"Memory consolidation failed: {e}")
+                continue
             elif text.startswith("/agent "):
                 new_agent = text[7:].strip()
                 agent_info = self.agent_registry.get(new_agent)
@@ -534,6 +556,8 @@ tcode REPL commands:
   /model [provider/]model  Switch model
   /cost         Show session cost
   /compact      Compact session history
+  /memory       Show project memory
+  /memory compact  Consolidate memory entries
   /<command>    Run a registered command
 
 Ctrl+C during generation aborts the current run.

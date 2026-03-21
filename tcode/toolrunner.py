@@ -60,56 +60,58 @@ class ToolRunner:
                 pass
 
         # Consult session-level permissions via ctx.ask (permission engine).
-        try:
-            perm_details = args if isinstance(args, dict) else {}
-            allowed = await ctx.ask(tool_id, perm_details)
-            if not allowed:
+        # Tools with permission="none" skip permission checks entirely (internal tools).
+        if tool.permission != "none":
+            try:
+                perm_details = args if isinstance(args, dict) else {}
+                allowed = await ctx.ask(tool_id, perm_details)
+                if not allowed:
+                    if part_id and session_id:
+                        await self.sessions.update_part_state(session_id, message_id, part_id, {"status": "error", "error": "Permission denied"})
+                    raise PermissionDeniedError(tool_id)
+            except PermissionDeniedError as pde:
                 if part_id and session_id:
-                    await self.sessions.update_part_state(session_id, message_id, part_id, {"status": "error", "error": "Permission denied"})
+                    try:
+                        await self.sessions.update_part_state(session_id, message_id, part_id, {"status": "error", "error": "Permission denied by rule"})
+                    except Exception:
+                        pass
+                # Publish tool.failed so TUI can update status from "running"
+                try:
+                    seq = await self.sessions.storage.next_sequence(session_id) if session_id else None
+                    ev_fail = Event.create("tool.failed", {"callID": call_id, "tool": tool_id, "sessionID": session_id, "messageID": message_id, "error": {"error": str(pde)}}, session_id=session_id, sequence=seq)
+                    await self.events.publish(ev_fail)
+                except Exception:
+                    pass
+                raise
+            except PermissionRejectedError as pre:
+                if part_id and session_id:
+                    try:
+                        await self.sessions.update_part_state(session_id, message_id, part_id, {"status": "error", "error": "Permission rejected by user"})
+                    except Exception:
+                        pass
+                # Publish tool.failed so TUI can update status from "running"
+                try:
+                    seq = await self.sessions.storage.next_sequence(session_id) if session_id else None
+                    ev_fail = Event.create("tool.failed", {"callID": call_id, "tool": tool_id, "sessionID": session_id, "messageID": message_id, "error": {"error": str(pre)}}, session_id=session_id, sequence=seq)
+                    await self.events.publish(ev_fail)
+                except Exception:
+                    pass
+                raise
+            except (PermissionError, Exception) as e:
+                # Other permission-related errors default to deny
+                if part_id and session_id:
+                    try:
+                        await self.sessions.update_part_state(session_id, message_id, part_id, {"status": "error", "error": str(e)})
+                    except Exception:
+                        pass
+                # Publish tool.failed so TUI can update status from "running"
+                try:
+                    seq = await self.sessions.storage.next_sequence(session_id) if session_id else None
+                    ev_fail = Event.create("tool.failed", {"callID": call_id, "tool": tool_id, "sessionID": session_id, "messageID": message_id, "error": {"error": str(e)}}, session_id=session_id, sequence=seq)
+                    await self.events.publish(ev_fail)
+                except Exception:
+                    pass
                 raise PermissionDeniedError(tool_id)
-        except PermissionDeniedError as pde:
-            if part_id and session_id:
-                try:
-                    await self.sessions.update_part_state(session_id, message_id, part_id, {"status": "error", "error": "Permission denied by rule"})
-                except Exception:
-                    pass
-            # Publish tool.failed so TUI can update status from "running"
-            try:
-                seq = await self.sessions.storage.next_sequence(session_id) if session_id else None
-                ev_fail = Event.create("tool.failed", {"callID": call_id, "tool": tool_id, "sessionID": session_id, "messageID": message_id, "error": {"error": str(pde)}}, session_id=session_id, sequence=seq)
-                await self.events.publish(ev_fail)
-            except Exception:
-                pass
-            raise
-        except PermissionRejectedError as pre:
-            if part_id and session_id:
-                try:
-                    await self.sessions.update_part_state(session_id, message_id, part_id, {"status": "error", "error": "Permission rejected by user"})
-                except Exception:
-                    pass
-            # Publish tool.failed so TUI can update status from "running"
-            try:
-                seq = await self.sessions.storage.next_sequence(session_id) if session_id else None
-                ev_fail = Event.create("tool.failed", {"callID": call_id, "tool": tool_id, "sessionID": session_id, "messageID": message_id, "error": {"error": str(pre)}}, session_id=session_id, sequence=seq)
-                await self.events.publish(ev_fail)
-            except Exception:
-                pass
-            raise
-        except (PermissionError, Exception) as e:
-            # Other permission-related errors default to deny
-            if part_id and session_id:
-                try:
-                    await self.sessions.update_part_state(session_id, message_id, part_id, {"status": "error", "error": str(e)})
-                except Exception:
-                    pass
-            # Publish tool.failed so TUI can update status from "running"
-            try:
-                seq = await self.sessions.storage.next_sequence(session_id) if session_id else None
-                ev_fail = Event.create("tool.failed", {"callID": call_id, "tool": tool_id, "sessionID": session_id, "messageID": message_id, "error": {"error": str(e)}}, session_id=session_id, sequence=seq)
-                await self.events.publish(ev_fail)
-            except Exception:
-                pass
-            raise PermissionDeniedError(tool_id)
 
         # Enforce plan-mode write restrictions: if this is a write_file tool and session is plan_active, only allow writing to plan file
         if tool_id in ("builtin_write_file", "builtin_shell") and session_id:

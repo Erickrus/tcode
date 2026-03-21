@@ -332,6 +332,8 @@ class TcodeBridge:
                     "  /agent <name> Switch agent\n"
                     "  /cost         Show session cost\n"
                     "  /compact      Compact session history\n"
+                    "  /memory       Show project memory\n"
+                    "  /memory compact  Consolidate memory entries\n"
                     "  /help         Show this help\n"
                     "  /quit         Exit\n"
                     "\n"
@@ -354,6 +356,38 @@ class TcodeBridge:
                 "type": "system",
                 "text": "Session compacted.",
             })
+
+        elif cmd == "memory":
+            sub = cmd_args.strip().lower()
+            if sub == "compact":
+                from ..memory import consolidate_memory, parse_entries
+                try:
+                    new_content = await consolidate_memory(
+                        self.cli.storage.base_dir,
+                        self.cli.provider_factory,
+                        provider_id=self.state.provider_id,
+                        model=self.state.model_id,
+                    )
+                    entries = parse_entries(new_content)
+                    self.state.messages.append({
+                        "type": "system",
+                        "text": f"Memory consolidated. {len(entries)} entries remaining.",
+                    })
+                except Exception as e:
+                    self.state.messages.append({
+                        "type": "error",
+                        "text": f"Memory consolidation failed: {e}",
+                    })
+            else:
+                from ..memory import read_memory
+                content = read_memory(self.cli.storage.base_dir)
+                if content:
+                    self.state.messages.append({"type": "system", "text": content})
+                else:
+                    self.state.messages.append({
+                        "type": "system",
+                        "text": "No project memory. Use memory_write tool or 'remember X' to create entries.",
+                    })
 
         elif cmd == "tools":
             tools = self.cli.tool_registry.list()

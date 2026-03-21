@@ -122,6 +122,8 @@ bin/python3.12 tcode.py -a build "add rate limiting to the API"
 | `/new`     | Start a new session             |
 | `/compact` | Compress conversation history   |
 | `/mcp`     | List MCP servers and tools      |
+| `/memory`  | Show project memory             |
+| `/memory compact` | Consolidate memory entries |
 | `/help`    | Show help                       |
 | `/quit`    | Exit                            |
 
@@ -261,6 +263,21 @@ Configure MCP servers in your `tcode.json`:
 
 Use `/mcp` in the TUI to see connected servers and available tools.
 
+## Project Memory
+
+tcode persists important context across sessions in `.tcode/MEMORY.md` — a human-readable, human-editable markdown file with timestamped entries.
+
+Each session gets a lightweight index of memory titles in the system prompt. The agent calls `memory_read` or `memory_search` tools to fetch full details on demand. Memory tools run without permission prompts.
+
+| Tool | Purpose |
+|------|---------|
+| `memory_write` | Save a new entry (or rewrite all with `replace_all`) |
+| `memory_read` | Read full memory or entries matching a substring |
+| `memory_search` | Search entries by keyword |
+| `memory_delete` | Remove entries by title match |
+
+Use `/memory` to view the file, `/memory compact` to consolidate entries via LLM.
+
 ## Architecture
 
 ```
@@ -271,7 +288,8 @@ tcode/
   session.py            Structured message/part model, session lifecycle
   storage_sqlite.py     SQLite persistence with versioned schema
   tools.py              Tool registry and execution framework
-  builtin_tools.py      File I/O, shell, HTTP, grep, edit, task management
+  builtin_tools.py      File I/O, shell, HTTP, grep, edit, task management, memory
+  memory.py             Project memory: parse, search, consolidate MEMORY.md
   mcp.py                MCP client wrapper with async streaming
   permissions.py        Async permission system with always-allow rules
   event.py              Event bus for real-time updates

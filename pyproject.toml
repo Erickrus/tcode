@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tcode"
+version = "0.0.1"
+description = "A terminal-native AI coding agent. Provider-agnostic."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+authors = [
+    { name = "Erickrus" },
+]
+keywords = ["ai", "coding", "agent", "terminal", "tui", "llm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development",
+    "Topic :: Software Development :: Code Generators",
+]
+dependencies = [
+    "pydantic>=2.0",
+    "httpx>=0.27",
+    "fastapi>=0.110",
+    "uvicorn>=0.30",
+    "openai>=2.0",
+    "anthropic>=0.80",
+    "ollama>=0.4",
+    "google-generativeai>=0.8",
+    "google-genai",
+    "runtui>=0.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Erickrus/tcode"
+Repository = "https://github.com/Erickrus/tcode"
+Issues = "https://github.com/Erickrus/tcode/issues"
+
+[project.scripts]
+tcode = "tcode.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["tcode*"]
+
+[tool.setuptools.package-data]
+tcode = ["py.typed"]
+
+[tool.setuptools]
+py-modules = ["tcode_app"]

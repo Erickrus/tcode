@@ -49,10 +49,15 @@ tcode is an interactive AI coding assistant that runs entirely in your terminal.
 ### From source
 
 ```bash
-git clone https://github.com/user/tcode.git
+git clone https://github.com/Erickrus/tcode.git
 cd tcode
 python3.12 -m venv .
 bin/pip install -r requirements.txt
+```
+
+### From source
+```bash
+pip install tcode
 ```
 
 ### Set up API keys

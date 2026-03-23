@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import re
 import tempfile
+import time as _time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -32,6 +33,28 @@ def read_memory(base_dir: str) -> str:
         return f.read()
 
 
+_REPLACE_MAX_RETRIES = 5
+_REPLACE_BASE_DELAY = 0.05  # seconds
+
+
+def _replace_with_retry(src: str, dst: str) -> None:
+    """os.replace with retry loop for transient PermissionError / OSError.
+
+    On Windows (and occasionally other platforms), antivirus scanners, search
+    indexers, or concurrent readers can briefly lock the target file, causing
+    os.replace() to fail.  Retrying after a short, exponentially increasing
+    delay resolves the issue in virtually all cases.
+    """
+    for attempt in range(_REPLACE_MAX_RETRIES):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempt == _REPLACE_MAX_RETRIES - 1:
+                raise
+            _time.sleep(_REPLACE_BASE_DELAY * (2 ** attempt))
+
+
 def write_memory(base_dir: str, content: str) -> None:
     """Atomic write: write to temp file then replace."""
     path = memory_path(base_dir)
@@ -40,7 +63,7 @@ def write_memory(base_dir: str, content: str) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(content)
-        os.replace(tmp, path)
+        _replace_with_retry(tmp, path)
     except Exception:
         try:
             os.unlink(tmp)

@@ -27,6 +27,28 @@ from typing import Optional, Dict, Any, List
 log = logging.getLogger(__name__)
 
 
+_REPLACE_MAX_RETRIES = 5
+_REPLACE_BASE_DELAY = 0.05  # seconds
+
+
+def _replace_with_retry(src: str, dst: str) -> None:
+    """os.replace with retry loop for transient PermissionError / OSError.
+
+    On Windows (and occasionally other platforms), antivirus scanners, search
+    indexers, or concurrent readers can briefly lock the target file, causing
+    os.replace() to fail.  Retrying after a short, exponentially increasing
+    delay resolves the issue in virtually all cases.
+    """
+    for attempt in range(_REPLACE_MAX_RETRIES):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempt == _REPLACE_MAX_RETRIES - 1:
+                raise
+            _time.sleep(_REPLACE_BASE_DELAY * (2 ** attempt))
+
+
 def _atomic_write(path: str, data: Any) -> None:
     """Write JSON atomically via temp file + os.replace()."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -35,7 +57,7 @@ def _atomic_write(path: str, data: Any) -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, default=str)
             f.write("\n")
-        os.replace(tmp, path)
+        _replace_with_retry(tmp, path)
     except Exception:
         try:
             os.unlink(tmp)
